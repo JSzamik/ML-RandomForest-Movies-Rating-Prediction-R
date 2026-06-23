@@ -1,0 +1,1089 @@
+---
+title: "Projekt analizy trendów filmowych według gatunków i finansów"
+subtitle: "Celem projektu jest zbadanie ewolucji popularności gatunków, czynników sukcesu oraz przewidywanie ocen filmów na podstawie gatunku, budżetu i liczby głosów."
+author: "Jakub Szamik Mateusz Kostkowski"
+date: today
+format: 
+  html:
+    theme:
+      light: journal
+    css: styles.css
+    number-sections: true
+    smooth-scroll: true
+    anchor-sections: true
+    html-math-method: katex
+    code-fold: true
+    code-summary: "Pokaż kod"
+    code-overflow: wrap
+    code-copy: true
+    highlight-style: github
+    self-contained: true
+    page-layout: full
+    fig-align: center
+    fig-caption: true
+    link-external-newwindow: true
+editor: source
+engine: knitr
+---
+
+```{r,include=FALSE}
+library(randomForest)
+library(tidyverse)
+library(Metrics)
+library(patchwork)
+library(dplyr)
+library(readr)
+library(leaflet)
+library(htmltools)
+library(countrycode)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(sf)
+library(scales)
+library(gganimate)
+library(gifski)
+library(broom)
+library(forcats)
+library(showtext)
+library(cluster)
+library(factoextra)
+library(plotly)
+library(gganimate)
+library(viridis)
+library(magick)
+library(xgboost)
+library(ggiraph)
+library(htmltools)
+library(tidyr)
+library(multcompView)
+library(fmsb)
+library(car)
+dane <- read.csv("movies.csv")
+dane <- na.omit(dane)
+dane
+```
+
+# Wstep
+
+Celem niniejszego projektu jest analiza trendów filmowych z uwzględnieniem gatunków, ocen widzów oraz aspektów finansowych produkcji. Badanie koncentruje się na identyfikacji zależności pomiędzy gatunkiem filmu a jego odbiorem, ewolucji popularności gatunków w czasie, a także relacji pomiędzy budżetem produkcji a osiąganymi przychodami.Do analizy wykorzystano dane pochodzące z publicznej bazy filmów dostępnej na platformie Kaggle, obejmujące informacje dotyczące m.in. gatunku, roku produkcji, budżetu, przychodów, ocen oraz liczby oddanych głosów. Na ich podstawie przeprowadzono analizę eksploracyjną, wizualizację trendów czasowych oraz segmentację filmów z wykorzystaniem metod klasteryzacji.Integralną częścią projektu jest również budowa modelu predykcyjnego, którego celem jest prognozowanie oceny filmu na podstawie wybranych cech opisujących produkcję. Uzyskane wyniki pozwalają lepiej zrozumieć czynniki wpływające na sukces filmu oraz stanowią podstawę do dalszych analiz i zastosowań predykcyjnych.
+
+# Gatunki a ocena.
+
+## Średnie oceny filmów w zależności od gatunku.
+
+```{r,echo=FALSE,warning=FALSE}
+
+# Wczytanie danych (zmień ścieżkę na swoją)
+movies <- read.csv("movies.csv", stringsAsFactors = FALSE)
+
+# Sprawdź nazwy kolumn (mogą się nieco różnić w zależności od wersji)
+
+# Oczyszczenie danych — usunięcie braków
+movies_clean <- movies %>%
+  filter(!is.na(score), !is.na(genre), !is.na(director))
+
+# 1️⃣ ŚREDNIA OCENA WEDŁUG GATUNKÓW
+genre_summary <- movies_clean %>%
+  group_by(genre) %>%
+  summarise(
+    mean_score = mean(score, na.rm = TRUE),
+    count = n()
+  ) %>%
+  arrange(desc(mean_score))
+
+# WYKRES 1: Średnia ocena wg gatunku
+ggplot(genre_summary,
+       aes(x = reorder(genre, mean_score), y = mean_score, fill = mean_score)) +
+  
+  geom_col(width = 0.6, color = "white", linewidth = 0.3) +
+  
+  scale_fill_distiller(palette = "RdYlBu", direction = -1) +
+  
+  coord_flip(ylim = c(5.5, 8.5)) +
+  
+  labs(
+    title = "Średnia ocena filmów według gatunków",
+    x = "Gatunek",
+    y = "Średnia ocena (IMDb)"
+  ) +
+  
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.border = element_blank(),
+    axis.text.y = element_text(size = 10, face = "bold"),
+    axis.text.x = element_text(size = 10),
+    plot.title = element_text(size = 16, face = "bold"),
+    plot.subtitle = element_text(size = 11, color = "gray40"),
+    axis.title = element_text(size = 12, face = "bold")
+  )
+
+
+```
+
+## Rozkład ocen według gatunków.
+
+```{r,echo=FALSE,warning=FALSE}
+
+# wybór gatunków z min. 5 filmami
+genres_min5 <- movies %>%
+  count(genre) %>%
+  filter(n >= 5) %>%
+  pull(genre)
+
+# boxplot bez legendy
+ggplot(movies %>% filter(genre %in% genres_min5),
+       aes(x = genre, y = score, fill = genre)) +
+  geom_boxplot() +
+  theme_minimal() +
+  scale_fill_viridis_d(option = "C") +
+  theme(legend.position = "none") +   # usuwa legendę
+  coord_flip() +
+  labs(title = "Rozkład ocen filmów według gatunku",
+       x = "Gatunek", y = "Ocena")
+
+```
+
+**H₀ (hipoteza zerowa):**
+
+Średnie oceny filmów **są takie same** we wszystkich gatunkach.Gatunek **nie wpływa** istotnie na ocenę filmu.
+
+**H₁ (hipoteza alternatywna):**
+
+Co najmniej jedna średnia ocena **różni się** od pozostałych.Gatunek filmu **ma istotny wpływ** na jego ocenę.
+
+```{r,include=FALSE,warning=FALSE}
+anova_model <- aov(score ~ genre, data = movies)
+summary(anova_model)
+
+movies3 <- movies %>%
+  group_by(genre) %>%
+  filter(n() >= 2) %>%
+  ungroup()
+
+
+
+```
+
+```{r,include=FALSE,warning=FALSE}
+welch_test <- oneway.test(score ~ genre, data = movies3)
+welch_test
+```
+
+```{r,echo=FALSE,warning=FALSE}
+res <- residuals(anova_model)
+
+qqnorm(res)
+qqline(res)
+
+
+leveneTest(score ~ genre, data = movies3)
+```
+
+Wykres Q–Q reszt wskazuje na niewielkie odchylenia od normalności w ogonach rozkładu, jednak centralna część rozkładu jest zgodna z rozkładem normalnym. Ze względu na dużą liczebność próby uznano, że założenie normalności reszt jest spełnione w stopniu wystarczającym do zastosowania testu ANOVA. Natomiast **założenie jednorodności wariancji jest WYRAŹNIE naruszone.** Różnice wariancji między gatunkami są **bardzo duże**.
+
+```{r,echo=FALSE}
+welch_test
+```
+
+Ze względu na naruszenie założenia jednorodności wariancji zastosowano jednoczynnikową analizę wariancji Welcha. Otrzymana p-wartość jest znacznie mniejsza od przyjętego poziomu istotności α = 0.05, co oznacza, że istnieją istotne podstawy, aby **odrzucić hipotezę zerową**. Przeprowadzona jednoczynnikowa analiza wariancji wykazała, że gatunek filmu ma **statystycznie istotny wpływ na ocenę**. Oznacza to, że istnieją **istotne różnice między średnimi ocenami** przynależnymi do różnych gatunków. Innymi słowy, co najmniej jeden gatunek filmowy znacząco różni się pod względem średniej oceny od pozostałych.
+
+```{r,echo=FALSE}
+pairwise.t.test(
+  movies3$score,
+  movies3$genre,
+  pool.sd = FALSE,
+  p.adjust.method = "BH"
+)
+
+
+```
+
+Analiza porównań parami z użyciem testów t Welcha, z korektą Benjamini–Hochberg, wykazała istotne różnice średnich ocen pomiędzy wieloma gatunkami filmowymi. W szczególności filmy biograficzne i animowane różniły się istotnie od większości pozostałych gatunków, podczas gdy gatunki takie jak Action i Adventure czy Crime i Drama nie wykazywały istotnych różnic.
+
+# Zależności międzynarodowe.
+
+```{r,echo=FALSE}
+# 1) Mapa świata
+world_sf <- read_sf(
+  "https://raw.githubusercontent.com/holtzy/R-graph-gallery/master/DATA/world.geojson"
+) %>%
+  filter(!name %in% c("Antarctica"))
+
+# 2) Dane filmowe
+movies <- read_csv("movies.csv", show_col_types = FALSE)
+
+# 3) Ręczne mapowanie nazw krajów
+fix <- c(
+  "United States" = "United States of America",
+  "USA" = "United States of America",
+  "UK" = "United Kingdom",
+  "Czech Republic" = "Czechia",
+  "South Korea" = "Korea, Republic of",
+  "North Korea" = "Korea, Democratic People's Republic of",
+  "Russia" = "Russia",
+  "Soviet Union" = "Russia",
+  "Iran" = "Iran, Islamic Republic of",
+  "Vietnam" = "Viet Nam",
+  "West Germany" = "Germany",
+  "Federal Republic of Yugoslavia" = "Serbia",
+  "Yugoslavia" = "Serbia",
+  "Republic of Macedonia" = "North Macedonia"
+)
+
+movies <- movies %>%
+  mutate(
+    country2 = dplyr::recode(country, !!!fix),
+    country2 = if_else(
+      is.na(country2),
+      countrycode(country, "country.name", "country.name"),
+      country2
+    )
+  )
+
+# 4) Liczba filmów i top gatunek per country
+films_by_country <- movies %>%
+  filter(!is.na(country2)) %>%
+  count(country2, name = "n_films")
+
+top_genre <- movies %>%
+  filter(!is.na(country2), !is.na(genre)) %>%
+  count(country2, genre) %>%
+  group_by(country2) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 1) %>%
+  rename(top_genre = genre)
+
+country_stats <- films_by_country %>%
+  left_join(top_genre, by = "country2")
+
+# 5) Merge z mapą + NAZWY DO WYŚWIETLANIA
+world_data <- world_sf %>%
+  left_join(country_stats, by = c("name" = "country2")) %>%
+  mutate(
+    # 👇 NAZWY DO PREZENTACJI
+    display_name = case_when(
+      name == "United States of America" ~ "USA",
+      name == "United Kingdom" ~ "UK",
+      TRUE ~ name
+    ),
+    log_films = log10(n_films + 1),
+    tooltip = ifelse(
+      is.na(n_films),
+      paste0("<b>", display_name, "</b><br>Brak danych"),
+      paste0(
+        "<b>", display_name, "</b><br>",
+        "Filmy: ", n_films, "<br>",
+        "Top gatunek: ", top_genre
+      )
+    ),
+    data_id = display_name
+  )
+
+# 6) Barplot TOP 10 krajów
+top_countries <- world_data %>%
+  filter(!is.na(n_films)) %>%
+  arrange(desc(n_films)) %>%
+  slice_head(n = 10) %>%
+  mutate(log_films_bar = log10(n_films + 1))
+
+p_bar <- ggplot(top_countries, aes(
+  x = reorder(display_name, log_films_bar),
+  y = log_films_bar,
+  tooltip = tooltip,
+  data_id = data_id,
+  fill = log_films_bar
+)) +
+  geom_col_interactive() +
+  coord_flip() +
+  scale_fill_gradientn(colors = c("#440154", "#31688E", "#35B779", "#FDE725")) +
+  labs(
+    title = "Kraje w liczbach",
+    subtitle = "[log10]",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+
+# 7) TOP 10 gatunków
+top_genres <- movies %>%
+  filter(!is.na(genre)) %>%
+  count(genre) %>%
+  arrange(desc(n)) %>%
+  slice_head(n = 10) %>%
+  mutate(
+    tooltip = paste0("<b>", genre, "</b><br>Liczba filmów: ", n),
+    data_id = genre
+  )
+
+p_genre <- ggplot(top_genres, aes(
+  x = reorder(genre, n),
+  y = n,
+  tooltip = tooltip,
+  data_id = data_id,
+  fill = n
+)) +
+  geom_col_interactive() +
+  coord_flip() +
+  scale_fill_gradientn(colors = c("#440154", "#31688E", "#35B779", "#FDE725")) +
+  labs(title = "Gatunki w liczbach", x = NULL, y = "Liczba filmów") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "none")
+
+# 8) Mapa interaktywna
+p_map <- ggplot() +
+  geom_sf(
+    data = world_data,
+    fill = "grey85",
+    color = "grey70",
+    size = 0.1
+  ) +
+  geom_sf_interactive(
+    data = filter(world_data, !is.na(n_films)),
+    aes(
+      fill = log_films,
+      tooltip = tooltip,
+      data_id = data_id
+    ),
+    color = "black",
+    size = 0.2
+  ) +
+  scale_fill_gradientn(
+    colors = c("#440154", "#31688E", "#35B779", "#FDE725"),
+    na.value = "grey90"
+  ) +
+  coord_sf(crs = st_crs(3857)) +
+  labs(title = "Produkcja filmów — mapa") +
+  theme_void(base_size = 14) +
+  theme(legend.position = "none",plot.title = element_text(hjust=0.5))
+
+
+# 9) Połączenie wykresów
+combined <- (p_bar | p_genre) / p_map +
+  plot_layout(heights = c(1, 2))
+
+# 10) Interaktywność
+interactive_plot <- girafe(
+  ggobj = combined,
+  options = list(
+    opts_hover(css = "fill:orange;stroke:black;stroke-width:1.6px;"),
+    opts_hover_inv(css = "opacity:0.3;"),
+    opts_selection(type = "single")
+  )
+)
+
+interactive_plot
+
+```
+
+Największą popularnością pośród produkowanych gatunków filmowych zdecydowanie cieszy się ,,Drama", co ciekawe w USA - kraju z którego pochodzi około 50% filmów z całej bazy danych najpopularniejszym gatunkiem jest ,,Comedy". Największe stężenie wyprodukowanych filmów można zauważyć w Ameryce Północnej, skąd pochodzi m.in. popularne **Hollywood** najbardziej rozpoznawalna dzielnica Los Angeles znana z przemysłu filmowego. W Europie najpopularniejszym gatunkiem niemalże jednogłośnie jest ,,Drama". W Azji najczęściej produkowanymi filmami będą te akcji, z wyjątkiem Japonii, w której produkowane są głównie animacje pochodzące właśnie z kraju kwitnącej wiśni zwane ,,Anime".
+
+```{r,include=FALSE}
+movies_clean
+movies_clean <- movies %>%
+  filter(!is.na(score), !is.na(budget), !is.na(runtime), !is.na(year), !is.na(genre),!is.na(votes)) %>%
+  mutate(genre = as.factor(genre))
+
+set.seed(123)
+train_index <- sample(1:nrow(movies_clean), 0.8 * nrow(movies_clean))
+train_data <- movies_clean[train_index, ]
+test_data  <- movies_clean[-train_index, ]
+
+# Model Random Forest
+set.seed(123)
+model_rf <- randomForest(score ~ budget + runtime + year + genre + votes, 
+                         data = train_data, 
+                         ntree = 500,         # liczba drzew
+                         mtry = 3,            # liczba zmiennych rozważanych przy każdym podziale
+                         importance = TRUE)   # ważność zmiennych
+  
+  # Predykcje
+  predictions_rf <- predict(model_rf, newdata = test_data)
+  
+  # Ocena modelu
+  rmse_value <- rmse(test_data$score, predictions_rf)
+mae_value <- mae(test_data$score, predictions_rf)
+
+
+
+```
+
+```{r,include=FALSE}
+# Przykładowe dane filmu
+new_movie <- data.frame(
+  budget = 50000000,
+  runtime = 120,
+  year = 2020,
+  genre = factor("Drama", levels = levels(train_data$genre)),
+  votes = 250000
+)
+
+# Predykcja
+predicted_score <- predict(model_rf, newdata = new_movie)
+
+# Przycięcie do zakresu 1–10
+predicted_score <- pmax(pmin(predicted_score, 10), 1)
+
+cat("Przewidywana ocena filmu:", round(predicted_score, 2), "\n")
+
+#save(model_rf, file = "model_rf.RData")
+saveRDS(model_rf, "model_rf.rds")
+saveRDS(levels(train_data$genre), "genre_levels.rds")
+```
+
+# Klasteryzacja.
+
+## Metoda łokcia - dobór liczby klastrów.
+
+```{r,echo=FALSE,warning=FALSE}
+# 1️⃣ Wczytanie danych
+movies <- read.csv("movies.csv")
+
+# 2️⃣ Wybór i czyszczenie danych
+df <- movies %>%
+  select(budget, gross, score, votes) %>%
+  filter(budget > 0, gross > 0) %>%
+  drop_na()
+
+# 3️⃣ Transformacja logarytmiczna (dla zmiennych finansowych)
+df <- df %>%
+  mutate(
+    budget_log = log1p(budget),
+    gross_log = log1p(gross)
+  ) %>%
+  select(budget_log, gross_log, score, votes)
+
+# 4️⃣ Skalowanie zmiennych
+df_scaled <- scale(df)
+
+# 5️⃣ Dobór liczby klastrów (metoda łokcia)
+fviz_nbclust(df_scaled, kmeans, method = "wss") +
+  ggtitle("Metoda łokcia - dobór liczby klastrów")
+```
+
+## **Interpretacja wykresu.**
+
+Na osi:
+
+-   **X (Number of clusters k)** – liczba klastrów (od 1 do 10),
+
+    **Y (Total Within Sum of Squares, WSS)** – miara tego, jak dobrze dane są pogrupowane (im niższa, tym lepiej).
+
+### Co widać:
+
+-   Przy **k = 1 → 2 → 3** krzywa **gwałtownie spada** — to znaczy, że każdy dodatkowy klaster znacząco poprawia dopasowanie (czyli grupy są bardziej zwarte).
+
+    Od około **k = 4** krzywa **zaczyna się wypłaszczać** — spadek wartości WSS jest coraz mniejszy.
+
+    Po **k = 4** dodawanie kolejnych klastrów już niewiele poprawia wynik.
+
+**Wniosek:**\
+Najlepszy wybór to **4 klastry**, bo w tym punkcie kończy się duża poprawa jakości grupowania.\
+To właśnie **„łokieć”** — miejsce, gdzie krzywa się „zagina”.
+
+-   WSS mierzy, **jak ściśle „trzymają się razem” punkty w danym klastrze.**
+
+-   Im mniejszy WSS, tym **bardziej podobne są elementy w grupie.**
+
+-   W metodzie łokcia patrzymy, jak WSS maleje przy dodawaniu kolejnych klastrów.
+
+```{r,echo=FALSE}
+# 6️⃣ Klasteryzacja K-means (np. 4 klastry)
+set.seed(123)
+k4 <- kmeans(df_scaled, centers = 4, nstart = 25)
+
+# 7️⃣ Dodanie wyników do danych
+df_clustered <- df %>%
+  mutate(cluster = factor(k4$cluster))
+
+# 8️⃣ Dodanie nazw klastrów (opisowych etykiet)
+df_clustered <- df_clustered %>%
+  mutate(cluster_label = case_when(
+    cluster == 1 ~ "Blockbustery (wysoki budżet, wysoki zysk, wysokie oceny)",
+    cluster == 2 ~ "Komercyjne porażki (średni budżet, niskie oceny, niskie zyski)",
+    cluster == 3 ~ "Filmy średniego segmentu (umiarkowany budżet i zyski)",
+    cluster == 4 ~ "Filmy niezależne (niski budżet, dobre oceny, mała widownia)"
+  ))
+
+# 9️⃣ Średnie wartości w klastrach
+cluster_summary <- df_clustered %>%
+  group_by(cluster, cluster_label) %>%
+  summarise(
+    avg_budget = mean(exp(budget_log)) - 1,
+    avg_gross = mean(exp(gross_log)) - 1,
+    avg_score = mean(score),
+    avg_votes = mean(votes),
+    n = n(),
+    .groups = "drop"
+  )
+
+print(cluster_summary)
+
+# 🔟 Wizualizacja (PCA)
+fviz_cluster(k4, data = df_scaled,
+             geom = "point",
+             ellipse.type = "norm",
+             ggtheme = theme_minimal(),
+             main = "Klastrowanie filmów (budget, gross, score, votes)") +
+  scale_color_manual(
+    values = c("#E41A1C", "#4DAF4A", "#377EB8", "#984EA3"),
+    labels = c(
+      "Blockbustery (wysoki budżet, wysokie zyski)",
+      "Komercyjne porażki",
+      "Filmy średniego segmentu",
+      "Filmy niezależne"
+    )
+  )
+
+```
+
+Wykres przedstawia wynik **analizy skupień (k-means)** dla czterech klastrów filmów, bazując na zmiennych:
+
+**budget** (budżet filmu)
+
+**gross** (przychody),
+
+**score** (ocena filmu),
+
+**votes** (liczba głosów widzów).
+
+## Co pokazuje wykres.
+
+To wykres z redukcji wymiarów metodą **PCA (analiza głównych składowych)**.\
+Na osi X (Dim1) i Y (Dim2) masz **dwie pierwsze składowe**, które razem tłumaczą:
+
+**Dim1:** 53% wariancji,
+
+**Dim2:** 28.5% wariancji.
+
+-   Razem więc \~81.5% całkowitej zmienności danych.
+
+-   Każdy **punkt** to jeden film.
+
+-   Kolor i kształt oznaczają **przynależność do klastra**.
+
+    PCA to sposób, żeby **zredukować liczbę wymiarów** danych,zachowując **jak najwięcej informacji**, aby **łatwiej zobaczyć wzorce** (np. grupy, zależności, klastry).
+
+# Ewolucja gatunków w czasie.
+
+## Dynamika zmian średniej oceny gatunków w Czasie.
+
+```{r,echo=FALSE}
+#all_years <- sort(unique(dane$year))
+#all_genres <- sort(unique(dane$genre))
+
+#grid <- expand.grid(
+  #year = all_years,
+ # genre = all_genres
+#)
+
+# ---- 2. Średnie oceny dla istniejących wartości ----
+
+#avg_by_year_genre <- dane %>%
+  #group_by(year, genre) %>%
+ # summarise(avg_score = mean(score), .groups = "drop")
+
+# ---- 3. Połączenie z siatką ----
+
+#full_data <- grid %>%
+ # left_join(avg_by_year_genre, by = c("year", "genre"))
+
+# ---- 4. LOCF — wypełnienie poprzednią wartością ----
+
+#full_filled <- full_data %>%
+  #arrange(genre, year) %>%
+  #group_by(genre) %>%
+  #fill(avg_score, .direction = "down") %>%
+ # ungroup()
+
+# Gdy gatunek nie istniał na początku — ustaw 0
+#full_filled <- full_filled %>%
+ # mutate(avg_score = replace_na(avg_score, 0))
+
+# ---- 5. Ranking oraz etykiety ----
+
+#full_ranked <- full_filled %>%
+  #group_by(year) %>%
+  #mutate(
+    #rank = rank(-avg_score, ties.method = "first"),
+   # score_label = round(avg_score, 2)
+  #) %>%
+  #ungroup()
+
+# ---- 6. Wykres bar chart race ----
+
+#p <- ggplot(
+  #full_ranked,
+  #aes(
+    #x = rank,
+    #y = avg_score,
+    #fill = genre,
+   # label = paste0(genre, "  ", score_label)
+  #)
+#) +
+  #geom_col(width = 0.8) +
+  #ylim(0, max(full_ranked$avg_score) * 1.3) +
+  #coord_flip() +
+  #scale_x_reverse() +
+  #scale_fill_viridis_d() +
+  #geom_text(hjust = -0.1, size = 6) +
+  #labs(
+    #title = "Średnie oceny filmów wg gatunku",
+    #subtitle = "Rok: {closest_state}",
+    #x = "",
+   # y = "Średnia ocena"
+  #) +
+  #theme_minimal(base_size = 16) +
+  #theme(
+   # legend.position = "none",
+    #plot.title = element_text(size = 20, face = "bold"),
+   # plot.subtitle = element_text(size = 18)
+  #) +
+  #transition_states(
+   # year,
+    #transition_length = 5,   # wolniejsze przejścia
+   # state_length = 2
+  #) +
+  #ease_aes("cubic-in-out")
+
+# 3. Animacja
+
+
+# Aby zapisać:
+# anim_save("gatunki_bar_chart_race.gif")
+#anim_save("animacja.gif", animate(p, fps = 25, duration = 45))
+```
+
+![](animacja.gif)
+
+Wykres przedstawia porównanie **średnich ocen filmów w poszczególnych gatunkach**. Długość słupków obrazuje poziom przeciętnej oceny, co pozwala na szybkie porównanie, które gatunki są oceniane wyżej, a które niżej. Wykres umożliwia ogólną ocenę zróżnicowania ocen filmów pomiędzy gatunkami.
+
+## Przykładowy rozkład zmian ocen dla gatunku 'Action' na przestrzeni lat.
+
+```{r,echo=FALSE,warning=FALSE}
+# 0. Filtrowanie tylko gatunku "Action"
+dane_action <- dane %>%
+  filter(genre == "Action")   # <-- jeśli kolumna nazywa się inaczej, zmień tutaj
+
+# 1. Agregacja roczna
+data_year <- dane_action %>%
+  group_by(year) %>%
+  summarise(
+    avg_score = mean(score, na.rm = TRUE),
+    films_count = n(),
+    .groups = "drop"
+  )
+
+# 2. Globalna średnia
+global_mean <- mean(data_year$avg_score, na.rm = TRUE)
+
+# 3. Kolorowanie względem średniej globalnej
+data_year <- data_year %>%
+  mutate(mycolor = ifelse(avg_score > global_mean, "above", "below"))
+
+# 4. Dane do segmentów
+segments <- data_year %>%
+  mutate(
+    x = year,
+    xend = year,
+    y = global_mean,
+    yend = avg_score,
+    tooltip = paste0(
+      "Rok: ", year, "\n",
+      "Średnia ocena: ", round(avg_score, 2), "\n",
+      "Liczba filmów: ", films_count
+    ),
+    data_id = year
+  )
+
+# 5. Wykres
+p <- ggplot(segments, aes(x = x, xend = xend, y = y, yend = yend, color = mycolor)) +
+  geom_segment_interactive(aes(tooltip = tooltip, data_id = data_id),
+                           size = 6, alpha = 0.9) +
+  geom_hline(yintercept = global_mean, linetype = "dashed", linewidth = 1, inherit.aes = FALSE) +
+  scale_color_manual(values = c("above" = "#F99A93", "below" = "#3EC8CC")) +
+  coord_cartesian(ylim = c(5.7, 6.7)) +
+  theme_light() +
+  theme(
+    legend.position = "none",
+    panel.border = element_blank(),
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 16),
+    plot.title = element_text(size = 16)
+  ) +
+  xlab("Rok") +
+  ylab("Średnia ocena") +
+  ggtitle("Średnia ocena filmów 'Action' na przestrzeni lat")
+
+# 6. Interaktywność
+girafe(
+  ggobj = p,
+  width_svg = 10,
+  height_svg = 6,
+  options = list(
+    opts_hover(css = "stroke:lightpurple; stroke-width:15px;"),
+    opts_tooltip(css = "background:#fff;color:black;padding:8px;border-radius:5px;border:1px solid #aaa;font-size:14px;")
+  )
+)
+
+```
+
+Wykres przedstawia zmiany **średniej oceny filmów z gatunku *Action*** w kolejnych latach. Oś pozioma obrazuje **rok produkcji**, natomiast oś pionowa przedstawia **średnią ocenę filmów**. Przerywana linia pozioma wyznacza **ogólną średnią ocen** dla całego analizowanego okresu (około 6,25).
+
+Słupki zaznaczone **kolorem różowy** oznaczają lata, w których średnia ocena filmów akcji była **powyżej średniej ogólnej**, natomiast **kolor niebieski** wskazuje lata, w których średnia ocena była **poniżej tej wartości**.
+
+Z wykresu wynika, że w latach **80. i na początku 90.** średnie oceny filmów akcji często oscylowały wokół średniej, z widocznymi wahaniami. **Najniższe średnie oceny** przypadają na drugą połowę lat 90., co sugeruje okres słabszego odbioru filmów akcji przez widzów. Od około **2005 roku** obserwowany jest wyraźny **trend wzrostowy**, a w ostatnich latach większość średnich ocen znajduje się **powyżej średniej długookresowej**, co może świadczyć o poprawie jakości lub większej popularności filmów akcji wśród odbiorców.
+
+# Ewolucja relacji między budżetami a przychodami filmów w czasie.
+
+## Średnie wartości roczne oraz skala nadwyżki przychodów nad kosztami produkcji
+
+```{r,echo=FALSE}
+movies_yearly_wide <- movies %>%
+  filter(
+    !is.na(year),
+    !is.na(budget),
+    !is.na(gross),
+    budget > 0,
+    gross > 0
+  ) %>%
+  group_by(year) %>%
+  summarise(
+    avg_budget = mean(budget),
+    avg_gross  = mean(gross),
+    .groups = "drop"
+  )
+
+movies_yearly_long <- movies_yearly_wide %>%
+  pivot_longer(
+    cols = c(avg_budget, avg_gross),
+    names_to = "type",
+    values_to = "value"
+  ) %>%
+  mutate(
+    type = dplyr::recode(
+      type,
+      avg_budget = "Średni budżet",
+      avg_gross  = "Średni przychód"
+    )
+  )
+
+movies_yearly_sum <- movies_yearly_wide %>%
+  mutate(total = avg_budget + avg_gross)
+
+movies_yearly_wide <- movies %>%
+  filter(
+    !is.na(year),
+    !is.na(budget),
+    !is.na(gross),
+    budget > 0,
+    gross > 0
+  ) %>%
+  group_by(year) %>%
+  summarise(
+    avg_budget = mean(budget),
+    avg_gross  = mean(gross),
+    .groups = "drop"
+  )
+
+ggplot(movies_yearly_wide, aes(x = year)) +
+
+  geom_ribbon(
+    aes(
+      ymin = 0,
+      ymax = avg_budget,
+      fill = "Średni budżet"
+    ),
+    alpha = 0.4
+  ) +
+
+  geom_ribbon(
+    aes(
+      ymin = avg_budget,
+      ymax = avg_gross,
+      fill = "Średni przychód"
+    ),
+    alpha = 0.4
+  ) +
+
+  geom_line(
+    aes(y = avg_budget, color = "Średni budżet"),
+    linewidth = 1.2
+  ) +
+  geom_line(
+    aes(y = avg_gross, color = "Średni przychód"),
+    linewidth = 1.2
+  ) +
+
+  scale_fill_manual(
+    values = c(
+      "Średni budżet"   = "#2A9D8F",
+      "Średni przychód" = "#E76F51"
+    )
+  ) +
+  scale_color_manual(
+    values = c(
+      "Średni budżet"   = "#2A9D8F",
+      "Średni przychód" = "#E76F51"
+    )
+  ) +
+
+  scale_y_continuous(
+    labels = scales::label_number(scale = 1e-6, suffix = " mln")
+  ) +
+  coord_cartesian(ylim = c(0, 300e6)) +
+
+  labs(
+    x = "Rok",
+    y = "Kwota",
+    fill  = NULL,
+    color = NULL
+  ) +
+
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = c(0.02, 0.98),
+    legend.justification = c("left", "top"),
+    legend.background = element_rect(
+      fill = scales::alpha("white", 0.7),
+      color = NA
+    ),
+    legend.key.size = unit(0.5, "lines"),
+    legend.text = element_text(size = 10)
+  )
+
+
+```
+
+Wykres przedstawia zmiany średnich rocznych budżetów produkcyjnych oraz przychodów filmów w czasie. Zielony obszar obrazuje poziom ponoszonych kosztów produkcji, natomiast pomarańczowe wypełnienie pokazuje skalę nadwyżki przychodów ponad budżet. Linie wskazują bezwzględne wartości obu zmiennych, umożliwiając ocenę ich dynamiki oraz relacji między kosztami a efektami finansowymi.
+
+-   Zarówno budżety, jak i przychody filmów wykazują długoterminowy trend wzrostowy.
+
+-   Przychody w całym okresie pozostają wyższe od budżetów, co wskazuje na utrzymującą się rentowność sektora.
+
+-   Różnica między przychodami a kosztami zwiększa się w czasie, sugerując rosnącą skalę generowanej nadwyżki finansowej.
+
+-   W ostatnich latach widoczna jest większa zmienność przychodów, co może oznaczać wzrost ryzyka przy jednoczesnym potencjale wyższych zysków.
+
+## Rozkład pomiędzy rokiem produkcji, średnią oceną a dochodem pogrupowany gatunkami.
+
+```{r,echo=FALSE,warning=FALSE}
+library(plotly)
+
+genres <- sort(unique(movies$genre))
+pal <- grDevices::rainbow(length(genres))
+names(pal) <- genres
+
+x_min <- min(movies$budget, na.rm = TRUE)
+x_max <- max(movies$budget, na.rm = TRUE)
+y_min <- min(movies$year, na.rm = TRUE)
+y_max <- max(movies$year, na.rm = TRUE)
+z_min <- 0
+z_max <- 3000000000
+
+plot_ly(
+  data = movies,
+  x = ~budget,
+  y = ~year,
+  z = ~gross,
+  type = "scatter3d",
+  mode = "markers",
+  color = ~genre,
+  colors = pal,
+  marker = list(size = 4),
+  hoverinfo = "text",
+  text = ~paste0(
+    "<b>Tytuł:</b> ", name, "<br>",
+    "<b>Gatunek:</b> ", genre, "<br>",
+    "<b>Rok:</b> ", year, "<br>",
+    "<b>Ocena:</b> ", score, "<br>",
+    "<b>Budżet:</b> $", format(budget, big.mark = ",", scientific = FALSE), "<br>",
+    "<b>Przychód:</b> $", format(gross,  big.mark = ",", scientific = FALSE)
+  )
+) %>%
+  layout(
+    title = "Filmy w przestrzeni budżet–rok–przychód",
+    scene = list(
+      xaxis = list(
+        title = "Budżet (USD)",
+        range = c(x_min, x_max),
+        tickformat = ","
+      ),
+      yaxis = list(
+        title = "Rok produkcji",
+        range = c(y_min, y_max)
+      ),
+      zaxis = list(
+        title = "Przychód (USD)",
+        range = c(z_min, z_max),
+        tickformat = ","
+      )
+    ),
+    legend = list(title = list(text = "<b>Gatunek filmu</b>"))
+  )
+
+```
+
+## Średnia różnica między dochodem a budżetem.
+
+```{r,include=FALSE,warning=FALSE}
+
+movies <- read.csv("movies.csv") %>%
+  filter(budget > 0, gross > 0,genre !="Family")
+
+raw <- movies %>%
+  group_by(genre) %>%
+  summarise(
+    Dem  = mean(budget),  # Dem = mean_budget
+    Rep  = mean(gross),   # Rep = mean_gross
+    .groups = "drop"
+  ) %>%
+  mutate(labels = as.character(genre))
+
+df <- raw
+
+# =============================
+# 2. Long format
+# =============================
+
+df_long <- df %>%
+  pivot_longer(c(Dem, Rep))
+
+# =============================
+# 3. Obliczenia jak w oryginale
+# =============================
+
+df <- raw %>%
+  mutate(
+    gap = Rep - Dem,
+    max = pmax(Dem, Rep),
+    labels = forcats::fct_reorder(labels, abs(gap))
+  )
+
+df_long <- df %>%
+  pivot_longer(c(Dem, Rep))
+
+# =============================
+# 4. MAIN DUMBBELL (p_main)
+# =============================
+
+nudge_value <- 5e6
+  
+
+p_main <- df_long %>%
+  ggplot(aes(x = value, y = labels)) +
+
+  geom_line(aes(group = labels),
+            color = "#E7E7E7",
+            linewidth = 3.5) +
+
+  geom_point(aes(color = name), size = 3) +
+
+  geom_text(aes(label = round(value/1e6,1),
+                color = name),
+            size = 3.25,
+            nudge_x = if_else(
+              df_long$value == df_long$max,
+              nudge_value, -nudge_value
+            ),
+            hjust = if_else(
+              df_long$value == df_long$max, 0, 1
+            )) +
+
+  
+
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_text(color = "black"),
+    axis.text.x = element_text(color = "#989898"),
+    axis.title = element_blank(),
+    panel.grid = element_blank()
+  ) +
+  labs(x = "Wartość (mln)", y = NULL) +
+  scale_color_manual(values = c("Dem" = "#436685", "Rep" = "#BF2F24")) +
+
+  coord_cartesian(ylim = c(1, nrow(df) + 0.5)) +
+
+   scale_x_continuous(limits = c(0, 300e6),
+                     labels = function(x) paste0(round(x/1e6), "M"))
+
+p_main
+
+# =============================
+# 5. GAP PANEL (p_gap)
+# =============================
+
+df_gap <- df %>%
+  mutate(
+    label = fct_reorder(labels, abs(gap)),
+    
+    # kto ma większą wartość?
+    gap_party_max = if_else(Rep == pmax(Dem, Rep), "R", "D"),
+    
+    # sformatowany gap (bez R / D jeśli będziesz chciał)
+    gap_label = paste0(
+      if_else(gap > 0, "+", "-"),
+      round(abs(gap) / 1e6, 1), "M"
+      # jeśli chcesz usunąć R/D to usuń gap_party_max z końca
+      # , gap_party_max
+    ) %>% fct_inorder()
+  )
+
+p_gap <- df_gap %>%
+  ggplot(aes(x = gap, y = labels)) +
+
+  geom_text(aes(x = 0, label = gap_label, color = gap_party_max),
+            fontface = "bold",
+            size = 3.25) +
+
+  geom_text(aes(x = 0, y = nrow(df)),
+            label = "Diff",
+            nudge_y = .5,
+            fontface = "bold",
+            size = 3.25) +
+
+  theme_void() +
+  coord_cartesian(
+    xlim = c(-.05, .05),
+    ylim = c(1, nrow(df) + 0.5)
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0),
+    panel.background = element_rect(fill = "#EFEFE3", color = "#EFEFE3"),
+    legend.position = "none"
+  ) +
+  scale_color_manual(values = c("R" = "#436685", "D" = "#BF2F24"))
+
+p_gap
+
+# =============================
+# 6. ŁĄCZENIE (patchwork)
+# =============================
+
+p_whole <-
+  p_main + p_gap + plot_layout(design =
+  c(
+    area(l = 0,  r = 45, t = 0, b = 1),
+    area(l = 46, r = 52, t = 0, b = 1)
+  ))
+
+p_whole
+
+```
+
+```{r,echo=FALSE,warning=FALSE}
+p_whole
+```
+
+**Animacje** zdecydowanie najbardziej się opłacają – najwyższa średnia różnica między dochodem a budżetem.
+
+**Action, Adventure i Mystery** także generują bardzo wysokie nadwyżki, co sugeruje dobrą relację koszt–zysk.
+
+Większość gatunków przynosi **dodatni wynik finansowy**, nawet przy umiarkowanych budżetach.
+
+**Western** jako jedyny gatunek notuje **stratę** – dochody nie pokrywają budżetu.
+
+Gatunki takie jak **Horror czy Thriller** mają relatywnie niskie budżety, a mimo to pozostają opłacalne.

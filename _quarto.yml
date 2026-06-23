@@ -1,0 +1,68 @@
+project:
+  type: website
+  output-dir: docs
+
+language:
+  search-text-placeholder: Szukaj
+
+website:
+  favicon: images/icon.ico
+  search:
+    location: sidebar
+    type: textbox
+
+  page-footer:
+    right:
+      - text: "© 2025 Jakub Szamik | Mateusz Kostkowski"
+    center:
+      - text: "Projekt z Zakresu Analizy Danych"
+    left:
+      - text: "Politechnika Lubelska, Wydział Matematyki i Informatyki Technicznej"
+  page-navigation: true
+
+  navbar:
+    pinned: true
+    left:
+      - text: "Strona Główna"
+        href: Projekt.qmd
+        icon: house
+      - text: "Sprawozdanie"
+        href: Raport.qmd
+        icon: book
+      - text: "Dataset"
+        href: "https://www.kaggle.com/datasets/danielgrijalvas/movies"
+        icon: database
+      - text: "Model"
+        href: Model.qmd
+        icon: gear
+    right:
+      - href: "https://github.com/JSzamik"
+        icon: github
+
+  sidebar:
+    style: "docked"
+    logo: "images/logo.jpg"
+    
+
+format:
+  html:
+    highlight-style: styles/tango.theme
+    #page-layout: full
+    theme: 
+      light: styles/mytheme.scss  
+    fontsize: 16px
+    css: styles.css
+    toc: true
+    toc-float: true 
+    toc-title: "Spis treści"
+    toc-location: left
+    toc-depth: 3
+    number-sections: true
+    number-depth: 3
+    code-fold: show
+    code-tools: true
+    code-summary: "Pokaż/Ukryj Kod"
+    anchor-sections: true
+    smooth-scroll: true
+
+df-print: kable

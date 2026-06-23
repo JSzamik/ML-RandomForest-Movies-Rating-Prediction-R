@@ -1,0 +1,45 @@
+/*-- scss:defaults --*/
+
+/* Kolory tła i tekstu */
+body {
+  background-color: #f0f8ff;
+  color: #333333;
+  font-family: "Arial", sans-serif;
+}
+
+/* Nagłówki */
+h1, h2, h3, h4, h5, h6 {
+  color: #00509e;
+  font-family: "Georgia", serif;
+}
+
+/* Linki */
+a {
+  color: #ff6f61;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Ramki wokół kodu */
+pre, code {
+  background-color: #e8e8e8;
+  padding: 5px 10px;
+  border-radius: 5px;
+}
+
+/* Tabela */
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+table, th, td {
+  border: 1px solid #ccc;
+}
+
+th {
+  background-color: #d0e0ff;
+}

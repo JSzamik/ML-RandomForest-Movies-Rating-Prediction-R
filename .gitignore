@@ -1,0 +1,15 @@
+# Cache i buildy Quarto
+/.quarto/
+/docs/
+/lib/
+/Project/
+*.html
+
+# Pliki środowiska R i ciężkie modele binarne
+.RData
+.Rhistory
+*.RData
+model_rf.rds
+
+# Opcjonalnie: jeśli animacja.gif spowalnia pushowanie projektu, odkomentuj linię niżej:
+# animacja.gif

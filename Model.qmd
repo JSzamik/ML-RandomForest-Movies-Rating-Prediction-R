@@ -1,0 +1,119 @@
+---
+title: ""
+format: 
+  html:
+    theme:
+      light: journal
+    css: styles.css
+editor: visual
+---
+
+```{r,include=FALSE}
+library(randomForest)
+library(tidyverse)
+library(Metrics)
+```
+
+```{r,include=FALSE}
+movies <- read.csv("movies.csv")
+movies_clean <- movies %>%
+  filter(!is.na(score), !is.na(budget), !is.na(runtime), !is.na(year), !is.na(genre),!is.na(votes)) %>%
+  mutate(genre = as.factor(genre))
+
+set.seed(123)
+train_index <- sample(1:nrow(movies_clean), 0.8 * nrow(movies_clean))
+train_data <- movies_clean[train_index, ]
+test_data  <- movies_clean[-train_index, ]
+
+# Model Random Forest
+set.seed(123)
+model_rf <- randomForest(score ~ budget + runtime + year + genre + votes, 
+                         data = train_data, 
+                         ntree = 500,         # liczba drzew
+                         mtry = 3,            # liczba zmiennych rozważanych przy każdym podziale
+                         importance = TRUE)   # ważność zmiennych
+  
+  # Predykcje
+  predictions_rf <- predict(model_rf, newdata = test_data)
+  
+  # Ocena modelu
+  rmse_value <- rmse(test_data$score, predictions_rf)
+mae_value <- mae(test_data$score, predictions_rf)
+
+new_movie <- data.frame(
+  budget = 50000000,
+  runtime = 120,
+  year = 2020,
+  genre = factor("Drama", levels = levels(train_data$genre)),
+  votes = 250000
+)
+
+# Predykcja
+predicted_score <- predict(model_rf, newdata = new_movie)
+
+# Przycięcie do zakresu 1–10
+predicted_score <- pmax(pmin(predicted_score, 10), 1)
+
+cat("Przewidywana ocena filmu:", round(predicted_score, 2), "\n")
+
+#save(model_rf, file = "model_rf.RData")
+saveRDS(model_rf, "model_rf.rds")
+saveRDS(levels(train_data$genre), "genre_levels.rds")
+```
+
+# Model predykcyjny oceny filmów oraz jego ewaluacja.
+
+W ramach projektu zbudowano model predykcyjny oparty na algorytmie **Random Forest**, którego celem było przewidywanie oceny filmu (*score*) na podstawie pięciu zmiennych objaśniających: **budżetu produkcji, długości trwania filmu, roku produkcji, gatunku oraz liczby oddanych głosów**. Random Forest jest zespołową metodą uczenia maszynowego, która łączy predykcje wielu drzew decyzyjnych, co pozwala ograniczyć przeuczenie oraz zwiększyć stabilność i dokładność modelu w porównaniu do pojedynczego drzewa.
+
+Dane zostały losowo podzielone na zbiór treningowy (80% obserwacji) oraz testowy (20%), co umożliwiło obiektywną ocenę jakości predykcji na danych niewidzianych podczas uczenia. Model wytrenowano z użyciem **500 drzew decyzyjnych**, przy czym w każdym podziale losowo rozważano **3 zmienne objaśniające** (parametr *mtry*). Dodatkowo włączono mechanizm oceny **ważności zmiennych**, co pozwala na interpretację wpływu poszczególnych cech na wynik modelu.
+
+## Ocena jakości predykcji
+
+Jako miary jakości predykcji zastosowano **RMSE** (Root Mean Squared Error) oraz **MAE** (Mean Absolute Error), które są standardowymi metrykami dla problemów regresyjnych.
+
+```{r,echo=FALSE}
+cat("RMSE:", rmse_value, "\n")
+```
+
+Oznacza to, że średni błąd predykcji, uwzględniający większą wagę dużych odchyleń, wynosi około **0.66** jednostki skali ocen. Wskazuje to na umiarkowany poziom błędu i dobrą zdolność modelu do odwzorowania rzeczywistych ocen filmów.
+
+```{r,echo=FALSE}
+
+cat("MAE:", mae_value, "\n")
+```
+
+Przeciętna bezwzględna różnica między wartością prognozowaną a rzeczywistą wynosi około ***0.47*** jednostki, co świadczy o stabilnym działaniu modelu oraz braku dużych, skrajnych pomyłek predykcyjnych.
+
+## Analiza ważności zmiennych
+
+```{r,echo=FALSE}
+importance(model_rf)
+```
+
+Analiza ważności zmiennych, oparta na miarach **%IncMSE** oraz **IncNodePurity**, wskazuje, że największy wpływ na jakość predykcji mają:
+
+**Liczba oddanych głosów (votes)** – zmienna o zdecydowanie największej ważności, co sugeruje, że skala zainteresowania widzów jest kluczowym czynnikiem powiązanym z oceną filmu.
+
+**Budżet produkcji (budget)** – istotny predyktor, który może pośrednio odzwierciedlać jakość produkcji, rozmach projektu oraz zaangażowanie zasobów.
+
+**Długość trwania filmu (runtime)** – zmienna o zauważalnym, choć mniejszym wpływie, potencjalnie związana z gatunkiem oraz charakterem filmu.
+
+Pozostałe zmienne, takie jak **rok produkcji** oraz **gatunek**, również wnoszą informację do modelu, jednak ich wpływ jest relatywnie mniejszy. Może to wynikać z faktu, że ich oddziaływanie na ocenę filmu jest bardziej pośrednie lub zależne od interakcji z innymi cechami.
+
+## Wnioski
+
+Uzyskane wyniki wskazują, że zbudowany model Random Forest charakteryzuje się **dobrą jakością predykcji** i skutecznie identyfikuje kluczowe czynniki wpływające na ocenę filmów. Największe znaczenie mają zmienne opisujące **zainteresowanie odbiorców** oraz **skalę produkcji**, co jest zgodne z intuicją oraz obserwacjami z rynku filmowego. Model może stanowić solidną podstawę do dalszych analiz, takich jak strojenie hiperparametrów, uwzględnienie dodatkowych cech lub porównanie z innymi metodami regresyjnymi.
+
+::: {style="text-align: center; margin: 30px 0;"}
+<a href="https://jszamik.shinyapps.io/MoviesRatingPrediction/"
+   target="_blank"
+   style="background-color: #F19A97;
+          color: white;
+          padding: 12px 25px;
+          text-align: center;
+          text-decoration: none;
+          display: inline-block;
+          border-radius: 8px;
+          font-weight: bold;
+          font-size: 1.1em;"> URUCHOM APLIKACJĘ SHINY </a>
+:::

@@ -1,0 +1,108 @@
+---
+title: "Projekt z zakresu analizy danych: Ewolucja trendów filmowych i czynniki sukcesu: analiza danych o filmach w ujęciu czasowym i predykcyjnym"
+format: 
+  html:
+    theme:
+      light: journal
+    css: styles.css
+editor: visual
+---
+
+# Cel Badania
+
+Celem niniejszego badania jest zidentyfikowanie czynników wpływających na ocenę filmów na bazie dostępnego zbioru danych o filmach. \
+Analiza obejmuje: 
+
+1\) Porównanie średnich ocen między gatunkami
+
+2\) Badanie trendów czasowych dla wybranych gatunków
+
+3\) Grupowanie filmów metodami klastrowania w oparciu o wielkość produkcji i wyniki finansowe
+
+4\) Zbudowanie modelu predykcyjnego przewidującego ocenę filmu na podstawie cech produkcji. 
+
+Wyniki mają służyć zarówno opisowi zjawisk, jak i modelom prognostycznym.
+
+### Dane
+
+Surowe dane wykorzystane w projekcie pochodzą z Kaggle:
+
+<https://www.kaggle.com/datasets/danielgrijalvas/movies> 
+
+Dane zostały pobrane ze strony kaggle w formacie csv oraz zaimportowane za pomocą: `dane <- read.csv("movies.csv")`
+
+Przed przystąpieniem do dalszej części projektu sprawdzono braki w danych.
+
+Dzięki niewielkiej ich ilości, po imporcie zostały oczysczone za pomocą `na.omit` . Duplikaty nie wsytępowały w tym datasecie.
+
+\
+Outliery wykryto graficznie (boxplot) . Wybrane ekstremalne wartości rozważono do usunięcia, w zależności od celu analizy.
+
+# Pytania badawcze i hipotezy
+
+## P1. Czy przeciętna ocena (score) różni się między gatunkami filmowymi?
+
+-   H0: Średnie oceny są takie same we wszystkich gatunkach.
+
+-   H1: Co najmniej jedna średnia ocena różni się od pozostałych.
+
+## P2. Czy średnia ocena gatunków filmowych zmieniała się w czasie?
+
+-   H0: Brak trendu w średnich ocenach w czasie.
+
+-   H1: Istnieje trend (wzrost/ spadek) średnich ocen.
+
+## P3. Jakie cechy filmów (budżet, runtime, votes, genre, year) najlepiej predykcyjnie wyjaśniają ocenę filmu?
+
+-   H0: Dane cechy nie poprawiają predykcji w istony sposób.
+
+-   H1: Wybrane cechy poprawiają predykcję w istotny sposób.
+
+## P4. Czy dane można sensownie podzielić na grupy (klastry) ze względu na budżet, przychód, ocenę i głosy?
+
+-   H0: Danych nie można podzielić na sensowne klastry.
+
+-   H1: Dane można podzielić na sensowne klastry.
+
+# Co robić z danymi przed modelem, EDA i uzasadnienia metod
+
+**Przygotowanie danych do modelowania i uzasadnienie metod**
+
+-   Dla porównania średnich między gatunkami zastosowano jednoczynnikową analizę wariancji (ANOVA), ponieważ porównujemy średnie w więcej niż dwóch grupach i założenia klasycznej ANOVA można ocenić (normalność reszt, jednorodność wariancji).
+
+-   K-means użyto do grupowania ze względu na jego prostotę i interpretowalność. Wybór liczby klastrów zweryfikowano metodą łokcia (WSS).
+
+-   Do predykcji zastosowano Random Forest — model zespołowy odporny na korelacje zmiennych i dobrze radzący sobie z mieszanym typem zmiennych (numeryczne i kategoryczne) oraz z brakiem potrzeby mocnego strojenia parametrów. Random Forest daje też miary ważności zmiennych. (więcej na temat modelu w zakładce ,,model").
+
+# Metryki, weryfikacja testu Welcha, parowych testów t Welcha.
+
+Analiza wariancji przeprowadzona z wykorzystaniem **testu Welcha** (`oneway.test`) wykazała **istotne statystycznie różnice** pomiędzy średnimi ocenami filmów w zależności od gatunku. Zastosowanie testu Welcha było uzasadnione ze względu na **niespełnienie założenia jednorodności wariancji** pomiędzy grupami.
+
+W celu identyfikacji, **które pary gatunków różnią się istotnie**, przeprowadzono analizę post-hoc w postaci **parowych testów t Welcha** (`pairwise.t.test` z `pool.sd = FALSE`), z korektą wartości *p* metodą **Benjamini–Hochberg (BH)** w celu kontroli błędu fałszywych odkryć.
+
+Wyniki testów post-hoc wskazują, że **istotne różnice nie występują pomiędzy wszystkimi parami gatunków**, lecz ograniczają się do wybranych kategorii. Oznacza to, że choć ogólny test Welcha potwierdza istnienie różnic pomiędzy średnimi ocenami filmów różnych gatunków, to **charakter tych różnic jest selektywny**, a nie powszechny dla wszystkich porównań.
+
+**Metryki modelu Random Forest\
+**Model oceniono poprzez RMSE i MAE oraz importance które wskazują na dobrą jakość predykcji. (Więcej na ten temat również w zakładce ,,model").
+
+# Wnioski i odniesienie do hipotez
+
+**Wnioski**
+
+-   Analiza wariancji z korektą Welcha wykazała **istotne statystycznie różnice w średnich ocenach filmów pomiędzy gatunkami**. Testy post-hoc wskazały, że różnice te **dotyczą jedynie wybranych kategorii**, co stanowi podstawę do **odrzucenia hipotezy zerowej**.
+
+-   Trendy czasowe dla gatunków filmowych wskazują na istotną różnicę średnich ocen w badanym okresie, co potwierdza hipotezę P2.
+
+-   Model Random Forest osiągnął RMSE = **0.656** i MAE = **0.472** na zbiorze testowym — oznacza to umiarkowaną/dobrą dokładność predykcji; najważniejszymi predyktorami są votes, budget i runtime. W świetle P3 możemy stwierdzić, że te cechy istotnie przyczyniają się do poprawy prognozy.
+
+-   Analiza klastrowa sugeruje istnienie czterech sensownych segmentów filmów (np. blockbustery, filmy niezależne itd.), co potwierdza hipotezę P4.
+
+**Rekomendacje**
+
+-   Rozszerzyć model o dodatkowe cechy (np. kraj produkcji, reżyser, obsada) i zrobić strojenie modelu (CV).
+
+-   W przypadku silnych outlierów w finansach rozważyć model odporny na wpływ skrajnych, np. modele oparte na medianie albo dalszą winsoryzację
+
+    # O modelu
+
+    Wszystkie istotne informacje na temat modelu wraz z jego metrykami oraz aplikacją shiny służącą do jego uruchomienia znajdują się niezmiennie w zakładce ,,model".
